@@ -160,7 +160,7 @@ class CreateAccessKeyFailure(Exception):
 
 class IAMRequestBase(object, metaclass=ABCMeta):
     def __init__(self, method, path, data, headers):
-        log.debug(
+        print(
             "Creating {class_name} with method={method}, path={path}, data={data}, headers={headers}".format(
                 class_name=self.__class__.__name__,
                 method=method,
@@ -200,6 +200,7 @@ class IAMRequestBase(object, metaclass=ABCMeta):
             "Signature=", ",", self._headers["Authorization"]
         )
         calculated_signature = self._calculate_signature()
+        print(f"{original_signature}, {calculated_signature}")
         if original_signature != calculated_signature:
             self._raise_signature_does_not_match()
 
@@ -213,6 +214,7 @@ class IAMRequestBase(object, metaclass=ABCMeta):
         permitted = False
         for policy in policies:
             iam_policy = IAMPolicy(policy)
+            print(f'Checking action {self._action}')
             permission_result = iam_policy.is_action_permitted(self._action)
             if permission_result == PermissionResult.DENIED:
                 self._raise_access_denied()
@@ -288,6 +290,7 @@ class IAMRequest(IAMRequestBase):
         return SigV4Auth(credentials, self._service, self._region)
 
     def _raise_access_denied(self):
+        print('ACCESS DENIED!')
         raise AccessDeniedError(user_arn=self._access_key.arn, action=self._action)
 
 

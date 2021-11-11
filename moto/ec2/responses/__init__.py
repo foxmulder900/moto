@@ -51,7 +51,7 @@ class EC2Response(
     ElasticIPAddresses,
     ElasticNetworkInterfaces,
     General,
-    InstanceResponse,
+    # InstanceResponse,
     InternetGateways,
     EgressOnlyInternetGateway,
     IPAddresses,

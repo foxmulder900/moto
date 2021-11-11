@@ -257,6 +257,16 @@ class ResponseObject(_TemplateEnvironmentMixin, ActionAuthenticatorMixin):
             # Using path-based buckets
             return self.bucket_response(request, full_url, headers)
 
+    def call_action(self):
+        try:
+            self._authenticate_and_authorize_s3_action()
+        except Exception as e:
+            print(e)
+            raise e
+
+        super().call_action()
+
+
     @amzn_request_id
     def bucket_response(self, request, full_url, headers):
         self.method = request.method

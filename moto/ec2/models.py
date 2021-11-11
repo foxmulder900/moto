@@ -1347,8 +1347,9 @@ class InstanceBackend(object):
             reservations = filter_reservations(reservations, filters)
         return reservations
 
-    def describe_instances(self, filters=None):
-        return self.all_reservations(filters)
+    # def describe_instances(self, filters=None):
+    #     raise Exception('models')
+    #     return self.all_reservations(filters)
 
     def describe_instance_status(self, instance_ids, include_all_instances, filters):
         if instance_ids:

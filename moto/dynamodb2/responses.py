@@ -23,7 +23,7 @@ def include_consumed_capacity(val=1.0):
         @wraps(f)
         def _wrapper(*args, **kwargs):
             (handler,) = args
-            expected_capacity = handler.body.get("ReturnConsumedCapacity", "NONE")
+            expected_capacity = handler._get_param("ReturnConsumedCapacity", "NONE")
             if expected_capacity not in ["NONE", "TOTAL", "INDEXES"]:
                 type_ = "ValidationException"
                 message = "1 validation error detected: Value '{}' at 'returnConsumedCapacity' failed to satisfy constraint: Member must satisfy enum value set: [INDEXES, TOTAL, NONE]".format(
@@ -34,8 +34,8 @@ def include_consumed_capacity(val=1.0):
                     handler.response_headers,
                     dynamo_json_dump({"__type": type_, "message": message}),
                 )
-            table_name = handler.body.get("TableName", "")
-            index_name = handler.body.get("IndexName", None)
+            table_name = handler._get_param("TableName", "")
+            index_name = handler._get_param("IndexName", None)
 
             response = f(*args, **kwargs)
 
@@ -111,12 +111,12 @@ class DynamoHandler(BaseResponse):
         if match:
             return match.split(".")[1]
 
-    def error(self, type_, message, status=400):
-        return (
-            status,
-            self.response_headers,
-            dynamo_json_dump({"__type": type_, "message": message}),
-        )
+    # def error(self, type_, message, status=400):
+    #     return (
+    #         status,
+    #         self.response_headers,
+    #         dynamo_json_dump({"__type": type_, "message": message}),
+    #     )
 
     @property
     def dynamodb_backend(self):
@@ -126,23 +126,23 @@ class DynamoHandler(BaseResponse):
         """
         return dynamodb_backends[self.region]
 
-    @amz_crc32
-    @amzn_request_id
-    def call_action(self):
-        self.body = json.loads(self.body or "{}")
-        endpoint = self.get_endpoint_name(self.headers)
-        if endpoint:
-            endpoint = camelcase_to_underscores(endpoint)
-            response = getattr(self, endpoint)()
-            if isinstance(response, str):
-                return 200, self.response_headers, response
-
-            else:
-                status_code, new_headers, response_content = response
-                self.response_headers.update(new_headers)
-                return status_code, self.response_headers, response_content
-        else:
-            return 404, self.response_headers, ""
+    # @amz_crc32
+    # @amzn_request_id
+    # def call_action(self):
+    #     self.body = json.loads(self.body or "{}")
+    #     endpoint = self.get_endpoint_name(self.headers)
+    #     if endpoint:
+    #         endpoint = camelcase_to_underscores(endpoint)
+    #         response = getattr(self, endpoint)()
+    #         if isinstance(response, str):
+    #             return 200, self.response_headers, response
+    #
+    #         else:
+    #             status_code, new_headers, response_content = response
+    #             self.response_headers.update(new_headers)
+    #             return status_code, self.response_headers, response_content
+    #     else:
+    #         return 404, self.response_headers, ""
 
     def list_tables(self):
         body = self.body
@@ -159,28 +159,25 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(response)
 
     def create_table(self):
-        body = self.body
-        # get the table name
-        table_name = body["TableName"]
+        table_name = self._get_param("TableName")
+        key_schema = self._get_param("KeySchema")
+        global_secondary_indexes = self._get_param("GlobalSecondaryIndexes", [])
+        local_secondary_indexes = self._get_param("LocalSecondaryIndexes", [])
+        attribute_definitions = self._get_param("AttributeDefinitions")
+        billing_mode = self._get_param("BillingMode")
+        provisioned_throughput = self._get_param("ProvisionedThroughput")
+        stream_specification = self._get_param("StreamSpecification")
+
         # check billing mode and get the throughput
-        if "BillingMode" in body.keys() and body["BillingMode"] == "PAY_PER_REQUEST":
-            if "ProvisionedThroughput" in body.keys():
+        if billing_mode == "PAY_PER_REQUEST":
+            if provisioned_throughput:
                 er = "com.amazonaws.dynamodb.v20111205#ValidationException"
                 return self.error(
                     er,
                     "ProvisionedThroughput cannot be specified \
                                    when BillingMode is PAY_PER_REQUEST",
                 )
-            throughput = None
-        else:  # Provisioned (default billing mode)
-            throughput = body.get("ProvisionedThroughput")
-        # getting the schema
-        key_schema = body["KeySchema"]
-        # getting attribute definition
-        attr = body["AttributeDefinitions"]
-        # getting the indexes
-        global_indexes = body.get("GlobalSecondaryIndexes", [])
-        local_secondary_indexes = body.get("LocalSecondaryIndexes", [])
+
         # Verify AttributeDefinitions list all
         expected_attrs = []
         expected_attrs.extend([key["AttributeName"] for key in key_schema])
@@ -193,28 +190,26 @@ class DynamoHandler(BaseResponse):
         expected_attrs.extend(
             schema["AttributeName"]
             for schema in itertools.chain(
-                *list(idx["KeySchema"] for idx in global_indexes)
+                *list(idx["KeySchema"] for idx in global_secondary_indexes)
             )
         )
         expected_attrs = list(set(expected_attrs))
         expected_attrs.sort()
-        actual_attrs = [item["AttributeName"] for item in attr]
+        actual_attrs = [item["AttributeName"] for item in attribute_definitions]
         actual_attrs.sort()
         if actual_attrs != expected_attrs:
             return self._throw_attr_error(
-                actual_attrs, expected_attrs, global_indexes or local_secondary_indexes
+                actual_attrs, expected_attrs, global_secondary_indexes or local_secondary_indexes
             )
-        # get the stream specification
-        streams = body.get("StreamSpecification")
 
         table = self.dynamodb_backend.create_table(
             table_name,
             schema=key_schema,
-            throughput=throughput,
-            attr=attr,
-            global_indexes=global_indexes,
+            throughput=provisioned_throughput,
+            attr=attribute_definitions,
+            global_indexes=global_secondary_indexes,
             indexes=local_secondary_indexes,
-            streams=streams,
+            streams=stream_specification,
         )
         if table is not None:
             return dynamo_json_dump(table.describe())
@@ -279,7 +274,7 @@ class DynamoHandler(BaseResponse):
                 )
 
     def delete_table(self):
-        name = self.body["TableName"]
+        name = self._get_param("TableName")
         table = self.dynamodb_backend.delete_table(name)
         if table is not None:
             return dynamo_json_dump(table.describe())
@@ -292,23 +287,23 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(response)
 
     def tag_resource(self):
-        table_arn = self.body["ResourceArn"]
-        tags = self.body["Tags"]
+        table_arn = self._get_param("ResourceArn")
+        tags = self._get_param("Tags")
         self.dynamodb_backend.tag_resource(table_arn, tags)
         return ""
 
     def untag_resource(self):
-        table_arn = self.body["ResourceArn"]
-        tags = self.body["TagKeys"]
+        table_arn = self._get_param("ResourceArn")
+        tags = self._get_param("TagKeys")
         self.dynamodb_backend.untag_resource(table_arn, tags)
         return ""
 
     def list_tags_of_resource(self):
         try:
-            table_arn = self.body["ResourceArn"]
+            table_arn = self._get_param("ResourceArn")
             all_tags = self.dynamodb_backend.list_tags_of_resource(table_arn)
             all_tag_keys = [tag["Key"] for tag in all_tags]
-            marker = self.body.get("NextToken")
+            marker = self._get_param("NextToken")
             if marker:
                 start = all_tag_keys.index(marker) + 1
             else:
@@ -326,10 +321,10 @@ class DynamoHandler(BaseResponse):
             return self.error(er, "Requested resource not found")
 
     def update_table(self):
-        name = self.body["TableName"]
-        global_index = self.body.get("GlobalSecondaryIndexUpdates", None)
-        throughput = self.body.get("ProvisionedThroughput", None)
-        stream_spec = self.body.get("StreamSpecification", None)
+        name = self._get_param("TableName")
+        global_index = self._get_param("GlobalSecondaryIndexUpdates", None)
+        throughput = self._get_param("ProvisionedThroughput", None)
+        stream_spec = self._get_param("StreamSpecification", None)
         try:
             table = self.dynamodb_backend.update_table(
                 name=name,
@@ -343,7 +338,7 @@ class DynamoHandler(BaseResponse):
             return self.error(er, "Cannot enable stream")
 
     def describe_table(self):
-        name = self.body["TableName"]
+        name = self._get_param("TableName")
         try:
             table = self.dynamodb_backend.describe_table(name)
             return dynamo_json_dump(table)
@@ -353,9 +348,9 @@ class DynamoHandler(BaseResponse):
 
     @include_consumed_capacity()
     def put_item(self):
-        name = self.body["TableName"]
-        item = self.body["Item"]
-        return_values = self.body.get("ReturnValues", "NONE")
+        name = self._get_param("TableName")
+        item = self._get_param("Item")
+        return_values = self._get_param("ReturnValues", "NONE")
 
         if return_values not in ("ALL_OLD", "NONE"):
             er = "com.amazonaws.dynamodb.v20111205#ValidationException"
@@ -366,7 +361,7 @@ class DynamoHandler(BaseResponse):
 
         overwrite = "Expected" not in self.body
         if not overwrite:
-            expected = self.body["Expected"]
+            expected = self._get_param("Expected")
         else:
             expected = None
 
@@ -379,9 +374,9 @@ class DynamoHandler(BaseResponse):
 
         # Attempt to parse simple ConditionExpressions into an Expected
         # expression
-        condition_expression = self.body.get("ConditionExpression")
-        expression_attribute_names = self.body.get("ExpressionAttributeNames", {})
-        expression_attribute_values = self.body.get("ExpressionAttributeValues", {})
+        condition_expression = self._get_param("ConditionExpression")
+        expression_attribute_names = self._get_param("ExpressionAttributeNames", {})
+        expression_attribute_values = self._get_param("ExpressionAttributeValues", {})
 
         if condition_expression:
             overwrite = False
@@ -418,7 +413,7 @@ class DynamoHandler(BaseResponse):
             return self.error(er, "Requested resource not found")
 
     def batch_write_item(self):
-        table_batches = self.body["RequestItems"]
+        table_batches = self._get_param("RequestItems")
 
         for table_name, table_requests in table_batches.items():
             for table_request in table_requests:
@@ -453,16 +448,16 @@ class DynamoHandler(BaseResponse):
 
     @include_consumed_capacity(0.5)
     def get_item(self):
-        name = self.body["TableName"]
+        name = self._get_param("TableName")
         table = self.dynamodb_backend.get_table(name)
         if table is None:
             return self.error(
                 "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
                 "Requested resource not found",
             )
-        key = self.body["Key"]
-        projection_expression = self.body.get("ProjectionExpression")
-        expression_attribute_names = self.body.get("ExpressionAttributeNames")
+        key = self._get_param("Key")
+        projection_expression = self._get_param("ProjectionExpression")
+        expression_attribute_names = self._get_param("ExpressionAttributeNames")
         if expression_attribute_names == {}:
             if projection_expression is None:
                 er = "ValidationException"
@@ -484,15 +479,21 @@ class DynamoHandler(BaseResponse):
         except ValueError:
             er = "com.amazon.coral.validate#ValidationException"
             return self.error(er, "Validation Exception")
-        if item:
-            item_dict = item.describe_attrs(attributes=None)
-            return dynamo_json_dump(item_dict)
-        else:
-            # Item not found
-            return dynamo_json_dump({})
+
+
+        template = self.response_template(DYNAMODB_GET_ITEM)
+        return template.render(buckets=all_buckets)
+
+        #
+        # if item:
+        #     item_dict = item.describe_attrs(attributes=None)
+        #     return dynamo_json_dump(item_dict)
+        # else:
+        #     # Item not found
+        #     return dynamo_json_dump({})
 
     def batch_get_item(self):
-        table_batches = self.body["RequestItems"]
+        table_batches = self._get_param("RequestItems")
 
         results = {"ConsumedCapacity": [], "Responses": {}, "UnprocessedKeys": {}}
 
@@ -562,12 +563,12 @@ class DynamoHandler(BaseResponse):
 
     @include_consumed_capacity()
     def query(self):
-        name = self.body["TableName"]
-        key_condition_expression = self.body.get("KeyConditionExpression")
-        projection_expression = self.body.get("ProjectionExpression")
-        expression_attribute_names = self.body.get("ExpressionAttributeNames", {})
-        filter_expression = self.body.get("FilterExpression")
-        expression_attribute_values = self.body.get("ExpressionAttributeValues", {})
+        name = self._get_param("TableName")
+        key_condition_expression = self._get_param("KeyConditionExpression")
+        projection_expression = self._get_param("ProjectionExpression")
+        expression_attribute_names = self._get_param("ExpressionAttributeNames", {})
+        filter_expression = self._get_param("FilterExpression")
+        expression_attribute_values = self._get_param("ExpressionAttributeValues", {})
 
         projection_expression = self._adjust_projection_expression(
             projection_expression, expression_attribute_names
@@ -576,7 +577,7 @@ class DynamoHandler(BaseResponse):
         filter_kwargs = {}
 
         if key_condition_expression:
-            value_alias_map = self.body.get("ExpressionAttributeValues", {})
+            value_alias_map = self._get_param("ExpressionAttributeValues", {})
 
             table = self.dynamodb_backend.get_table(name)
 
@@ -587,7 +588,7 @@ class DynamoHandler(BaseResponse):
                     "Requested resource not found",
                 )
 
-            index_name = self.body.get("IndexName")
+            index_name = self._get_param("IndexName")
             if index_name:
                 all_indexes = (table.global_indexes or []) + (table.indexes or [])
                 indexes_by_name = dict((i.name, i) for i in all_indexes)
@@ -605,7 +606,7 @@ class DynamoHandler(BaseResponse):
                 index = table.schema
 
             reverse_attribute_lookup = dict(
-                (v, k) for k, v in self.body.get("ExpressionAttributeNames", {}).items()
+                (v, k) for k, v in self._get_param("ExpressionAttributeNames", {}).items()
             )
 
             if " and " in key_condition_expression.lower():
@@ -710,8 +711,8 @@ class DynamoHandler(BaseResponse):
             )
         else:
             # 'KeyConditions': {u'forum_name': {u'ComparisonOperator': u'EQ', u'AttributeValueList': [{u'S': u'the-key'}]}}
-            key_conditions = self.body.get("KeyConditions")
-            query_filters = self.body.get("QueryFilter")
+            key_conditions = self._get_param("KeyConditions")
+            query_filters = self._get_param("QueryFilter")
 
             if not (key_conditions or query_filters):
                 return self.error(
@@ -750,10 +751,10 @@ class DynamoHandler(BaseResponse):
                             range_values = []
             if query_filters:
                 filter_kwargs.update(query_filters)
-        index_name = self.body.get("IndexName")
-        exclusive_start_key = self.body.get("ExclusiveStartKey")
-        limit = self.body.get("Limit")
-        scan_index_forward = self.body.get("ScanIndexForward")
+        index_name = self._get_param("IndexName")
+        exclusive_start_key = self._get_param("ExclusiveStartKey")
+        limit = self._get_param("Limit")
+        scan_index_forward = self._get_param("ScanIndexForward")
         items, scanned_count, last_evaluated_key = self.dynamodb_backend.query(
             name,
             hash_key,
@@ -778,7 +779,7 @@ class DynamoHandler(BaseResponse):
             "ScannedCount": scanned_count,
         }
 
-        if self.body.get("Select", "").upper() != "COUNT":
+        if self._get_param("Select", "").upper() != "COUNT":
             result["Items"] = [item.attrs for item in items]
 
         if last_evaluated_key is not None:
@@ -807,10 +808,10 @@ class DynamoHandler(BaseResponse):
 
     @include_consumed_capacity()
     def scan(self):
-        name = self.body["TableName"]
+        name = self._get_param("TableName")
 
         filters = {}
-        scan_filters = self.body.get("ScanFilter", {})
+        scan_filters = self._get_param("ScanFilter", {})
         for attribute_name, scan_filter in scan_filters.items():
             # Keys are attribute names. Values are tuples of (comparison,
             # comparison_value)
@@ -818,13 +819,13 @@ class DynamoHandler(BaseResponse):
             comparison_values = scan_filter.get("AttributeValueList", [])
             filters[attribute_name] = (comparison_operator, comparison_values)
 
-        filter_expression = self.body.get("FilterExpression")
-        expression_attribute_values = self.body.get("ExpressionAttributeValues", {})
-        expression_attribute_names = self.body.get("ExpressionAttributeNames", {})
-        projection_expression = self.body.get("ProjectionExpression", "")
-        exclusive_start_key = self.body.get("ExclusiveStartKey")
-        limit = self.body.get("Limit")
-        index_name = self.body.get("IndexName")
+        filter_expression = self._get_param("FilterExpression")
+        expression_attribute_values = self._get_param("ExpressionAttributeValues", {})
+        expression_attribute_names = self._get_param("ExpressionAttributeNames", {})
+        projection_expression = self._get_param("ProjectionExpression", "")
+        exclusive_start_key = self._get_param("ExclusiveStartKey")
+        limit = self._get_param("Limit")
+        index_name = self._get_param("IndexName")
 
         try:
             items, scanned_count, last_evaluated_key = self.dynamodb_backend.scan(
@@ -864,9 +865,9 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(result)
 
     def delete_item(self):
-        name = self.body["TableName"]
-        key = self.body["Key"]
-        return_values = self.body.get("ReturnValues", "NONE")
+        name = self._get_param("TableName")
+        key = self._get_param("Key")
+        return_values = self._get_param("ReturnValues", "NONE")
         if return_values not in ("ALL_OLD", "NONE"):
             er = "com.amazonaws.dynamodb.v20111205#ValidationException"
             return self.error(er, "Return values set to invalid value")
@@ -880,9 +881,9 @@ class DynamoHandler(BaseResponse):
 
         # Attempt to parse simple ConditionExpressions into an Expected
         # expression
-        condition_expression = self.body.get("ConditionExpression")
-        expression_attribute_names = self.body.get("ExpressionAttributeNames", {})
-        expression_attribute_values = self.body.get("ExpressionAttributeValues", {})
+        condition_expression = self._get_param("ConditionExpression")
+        expression_attribute_names = self._get_param("ExpressionAttributeNames", {})
+        expression_attribute_values = self._get_param("ExpressionAttributeValues", {})
 
         try:
             item = self.dynamodb_backend.delete_item(
@@ -906,11 +907,11 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(item_dict)
 
     def update_item(self):
-        name = self.body["TableName"]
-        key = self.body["Key"]
-        return_values = self.body.get("ReturnValues", "NONE")
-        update_expression = self.body.get("UpdateExpression", "").strip()
-        attribute_updates = self.body.get("AttributeUpdates")
+        name = self._get_param("TableName")
+        key = self._get_param("Key")
+        return_values = self._get_param("ReturnValues", "NONE")
+        update_expression = self._get_param("UpdateExpression", "").strip()
+        attribute_updates = self._get_param("AttributeUpdates")
         if update_expression and attribute_updates:
             er = "com.amazonaws.dynamodb.v20111205#ValidationException"
             return self.error(
@@ -935,15 +936,15 @@ class DynamoHandler(BaseResponse):
             return self.error(er, "Return values set to invalid value")
 
         if "Expected" in self.body:
-            expected = self.body["Expected"]
+            expected = self._get_param("Expected")
         else:
             expected = None
 
         # Attempt to parse simple ConditionExpressions into an Expected
         # expression
-        condition_expression = self.body.get("ConditionExpression")
-        expression_attribute_names = self.body.get("ExpressionAttributeNames", {})
-        expression_attribute_values = self.body.get("ExpressionAttributeValues", {})
+        condition_expression = self._get_param("ConditionExpression")
+        expression_attribute_names = self._get_param("ExpressionAttributeNames", {})
+        expression_attribute_values = self._get_param("ExpressionAttributeValues", {})
 
         try:
             item = self.dynamodb_backend.update_item(
@@ -1029,22 +1030,22 @@ class DynamoHandler(BaseResponse):
         )
 
     def update_time_to_live(self):
-        name = self.body["TableName"]
-        ttl_spec = self.body["TimeToLiveSpecification"]
+        name = self._get_param("TableName")
+        ttl_spec = self._get_param("TimeToLiveSpecification")
 
         self.dynamodb_backend.update_time_to_live(name, ttl_spec)
 
         return json.dumps({"TimeToLiveSpecification": ttl_spec})
 
     def describe_time_to_live(self):
-        name = self.body["TableName"]
+        name = self._get_param("TableName")
 
         ttl_spec = self.dynamodb_backend.describe_time_to_live(name)
 
         return json.dumps({"TimeToLiveDescription": ttl_spec})
 
     def transact_get_items(self):
-        transact_items = self.body["TransactItems"]
+        transact_items = self._get_param("TransactItems")
         responses = list()
 
         if len(transact_items) > TRANSACTION_MAX_ITEMS:
@@ -1067,7 +1068,7 @@ class DynamoHandler(BaseResponse):
 
             return self.error("ValidationException", msg)
 
-        ret_consumed_capacity = self.body.get("ReturnConsumedCapacity", "NONE")
+        ret_consumed_capacity = self._get_param("ReturnConsumedCapacity", "NONE")
         consumed_capacity = dict()
 
         for transact_item in transact_items:
@@ -1109,7 +1110,7 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(result)
 
     def transact_write_items(self):
-        transact_items = self.body["TransactItems"]
+        transact_items = self._get_param("TransactItems")
         try:
             self.dynamodb_backend.transact_write_items(transact_items)
         except TransactionCanceledException as e:
@@ -1119,7 +1120,7 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(response)
 
     def describe_continuous_backups(self):
-        name = self.body["TableName"]
+        name = self._get_param("TableName")
 
         if self.dynamodb_backend.get_table(name) is None:
             return self.error(
@@ -1132,8 +1133,8 @@ class DynamoHandler(BaseResponse):
         return json.dumps({"ContinuousBackupsDescription": response})
 
     def update_continuous_backups(self):
-        name = self.body["TableName"]
-        point_in_time_spec = self.body["PointInTimeRecoverySpecification"]
+        name = self._get_param("TableName")
+        point_in_time_spec = self._get_param("PointInTimeRecoverySpecification")
 
         if self.dynamodb_backend.get_table(name) is None:
             return self.error(

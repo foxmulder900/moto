@@ -14,6 +14,7 @@ from copy import deepcopy
 
 class InstanceResponse(BaseResponse):
     def describe_instances(self):
+        raise Exception('responses')
         self.error_on_dryrun()
         filter_dict = filters_from_querystring(self.querystring)
         instance_ids = self._get_multi_param("InstanceId")

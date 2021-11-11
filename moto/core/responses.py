@@ -117,6 +117,9 @@ class ActionAuthenticatorMixin(object):
     request_count = 0
 
     def _authenticate_and_authorize_action(self, iam_request_cls):
+        print(f'Authenticator - {ActionAuthenticatorMixin.request_count} - {iam_request_cls}')
+        print(self)
+        print(self.headers)
         if (
             ActionAuthenticatorMixin.request_count
             >= settings.INITIAL_NO_AUTH_ACTION_COUNT
@@ -124,7 +127,7 @@ class ActionAuthenticatorMixin(object):
             iam_request = iam_request_cls(
                 method=self.method, path=self.path, data=self.data, headers=self.headers
             )
-            iam_request.check_signature()
+            # iam_request.check_signature()
             iam_request.check_action_permitted()
         else:
             ActionAuthenticatorMixin.request_count += 1
@@ -387,7 +390,10 @@ class BaseResponse(_TemplateEnvironmentMixin, ActionAuthenticatorMixin):
         return action
 
     def call_action(self):
+        action = self._get_action()
+        print(f'call_action: {action}')
         headers = self.response_headers
+        self.data["Action"] = action
 
         try:
             self._authenticate_and_authorize_normal_action()
@@ -395,7 +401,7 @@ class BaseResponse(_TemplateEnvironmentMixin, ActionAuthenticatorMixin):
             response = http_error.description, dict(status=http_error.code)
             return self._send_response(headers, response)
 
-        action = camelcase_to_underscores(self._get_action())
+        action = camelcase_to_underscores(action)
         method_names = method_names_from_class(self.__class__)
         if action in method_names:
             method = getattr(self, action)

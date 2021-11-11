@@ -254,6 +254,7 @@ def test_access_denied_with_no_policy():
         aws_secret_access_key=access_key["SecretAccessKey"],
     )
     with pytest.raises(ClientError) as ex:
+        print('Calling describe_instances...')
         client.describe_instances()
     ex.value.response["Error"]["Code"].should.equal("AccessDenied")
     ex.value.response["ResponseMetadata"]["HTTPStatusCode"].should.equal(403)
