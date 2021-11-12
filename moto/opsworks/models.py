@@ -630,38 +630,38 @@ class OpsWorksBackend(BaseBackend):
             raise ResourceNotFoundException(", ".join(unknown_apps))
         return [self.apps[id].to_dict() for id in app_ids]
 
-    # def describe_instances(self, instance_ids, layer_id, stack_id):
-    #     if len(list(filter(None, (instance_ids, layer_id, stack_id)))) != 1:
-    #         raise ValidationException(
-    #             "Please provide either one or more "
-    #             "instance IDs or one stack ID or one "
-    #             "layer ID"
-    #         )
-    #     if instance_ids:
-    #         unknown_instances = set(instance_ids) - set(self.instances.keys())
-    #         if unknown_instances:
-    #             raise ResourceNotFoundException(", ".join(unknown_instances))
-    #         return [self.instances[id].to_dict() for id in instance_ids]
-    #
-    #     if layer_id:
-    #         if layer_id not in self.layers:
-    #             raise ResourceNotFoundException(
-    #                 "Unable to find layer with ID {0}".format(layer_id)
-    #             )
-    #         instances = [
-    #             i.to_dict() for i in self.instances.values() if layer_id in i.layer_ids
-    #         ]
-    #         return instances
-    #
-    #     if stack_id:
-    #         if stack_id not in self.stacks:
-    #             raise ResourceNotFoundException(
-    #                 "Unable to find stack with ID {0}".format(stack_id)
-    #             )
-    #         instances = [
-    #             i.to_dict() for i in self.instances.values() if stack_id == i.stack_id
-    #         ]
-    #         return instances
+    def describe_instances(self, instance_ids, layer_id, stack_id):
+        if len(list(filter(None, (instance_ids, layer_id, stack_id)))) != 1:
+            raise ValidationException(
+                "Please provide either one or more "
+                "instance IDs or one stack ID or one "
+                "layer ID"
+            )
+        if instance_ids:
+            unknown_instances = set(instance_ids) - set(self.instances.keys())
+            if unknown_instances:
+                raise ResourceNotFoundException(", ".join(unknown_instances))
+            return [self.instances[id].to_dict() for id in instance_ids]
+
+        if layer_id:
+            if layer_id not in self.layers:
+                raise ResourceNotFoundException(
+                    "Unable to find layer with ID {0}".format(layer_id)
+                )
+            instances = [
+                i.to_dict() for i in self.instances.values() if layer_id in i.layer_ids
+            ]
+            return instances
+
+        if stack_id:
+            if stack_id not in self.stacks:
+                raise ResourceNotFoundException(
+                    "Unable to find stack with ID {0}".format(stack_id)
+                )
+            instances = [
+                i.to_dict() for i in self.instances.values() if stack_id == i.stack_id
+            ]
+            return instances
 
     def start_instance(self, instance_id):
         if instance_id not in self.instances:

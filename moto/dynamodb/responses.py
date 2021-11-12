@@ -20,23 +20,21 @@ class DynamoHandler(BaseResponse):
     def error(self, type_, status=400):
         return status, self.response_headers, dynamo_json_dump({"__type": type_})
 
-    # def call_action(self):
-    #     self.body = json.loads(self.body or "{}")
-    #     print('HEY')
-    #     print(self.body)
-    #     endpoint = self.get_endpoint_name(self.headers)
-    #     if endpoint:
-    #         endpoint = camelcase_to_underscores(endpoint)
-    #         response = getattr(self, endpoint)()
-    #         if isinstance(response, str):
-    #             return 200, self.response_headers, response
-    #
-    #         else:
-    #             status_code, new_headers, response_content = response
-    #             self.response_headers.update(new_headers)
-    #             return status_code, self.response_headers, response_content
-    #     else:
-    #         return 404, self.response_headers, ""
+    def call_action(self):
+        self.body = json.loads(self.body or "{}")
+        endpoint = self.get_endpoint_name(self.headers)
+        if endpoint:
+            endpoint = camelcase_to_underscores(endpoint)
+            response = getattr(self, endpoint)()
+            if isinstance(response, str):
+                return 200, self.response_headers, response
+
+            else:
+                status_code, new_headers, response_content = response
+                self.response_headers.update(new_headers)
+                return status_code, self.response_headers, response_content
+        else:
+            return 404, self.response_headers, ""
 
     def list_tables(self):
         body = self.body
@@ -94,8 +92,8 @@ class DynamoHandler(BaseResponse):
             return self.error(er)
 
     def update_table(self):
-        name = self._get_param("TableName")
-        throughput = self._get_param("ProvisionedThroughput")
+        name = self.body["TableName"]
+        throughput = self.body["ProvisionedThroughput"]
         new_read_units = throughput["ReadCapacityUnits"]
         new_write_units = throughput["WriteCapacityUnits"]
         table = dynamodb_backend.update_table_throughput(
@@ -104,7 +102,7 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(table.describe)
 
     def describe_table(self):
-        name = self._get_param("TableName")
+        name = self.body["TableName"]
         try:
             table = dynamodb_backend.tables[name]
         except KeyError:
@@ -113,8 +111,8 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(table.describe)
 
     def put_item(self):
-        name = self._get_param("TableName")
-        item = self._get_param("Item")
+        name = self.body["TableName"]
+        item = self.body["Item"]
         result = dynamodb_backend.put_item(name, item)
         if result:
             item_dict = result.to_json()
@@ -125,7 +123,7 @@ class DynamoHandler(BaseResponse):
             return self.error(er)
 
     def batch_write_item(self):
-        table_batches = self._get_param("RequestItems")
+        table_batches = self.body["RequestItems"]
 
         for table_name, table_requests in table_batches.items():
             for table_request in table_requests:
@@ -152,12 +150,11 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(response)
 
     def get_item(self):
-        print('GETTING ITEM')
-        name = self._get_param("TableName")
-        key = self._get_param("Key")
+        name = self.body["TableName"]
+        key = self.body["Key"]
         hash_key = key["HashKeyElement"]
         range_key = key.get("RangeKeyElement")
-        attrs_to_get = self._get_param("AttributesToGet")
+        attrs_to_get = self.body.get("AttributesToGet")
         try:
             item = dynamodb_backend.get_item(name, hash_key, range_key)
         except ValueError:
@@ -173,7 +170,7 @@ class DynamoHandler(BaseResponse):
             return self.error(er, status=404)
 
     def batch_get_item(self):
-        table_batches = self._get_param("RequestItems")
+        table_batches = self.body["RequestItems"]
 
         results = {"Responses": {"UnprocessedKeys": {}}}
 
@@ -195,9 +192,9 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(results)
 
     def query(self):
-        name = self._get_param("TableName")
-        hash_key = self._get_param("HashKeyValue")
-        range_condition = self._get_param("RangeKeyCondition")
+        name = self.body["TableName"]
+        hash_key = self.body["HashKeyValue"]
+        range_condition = self.body.get("RangeKeyCondition")
         if range_condition:
             range_comparison = range_condition["ComparisonOperator"]
             range_values = range_condition["AttributeValueList"]
@@ -228,10 +225,10 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(result)
 
     def scan(self):
-        name = self._get_param("TableName")
+        name = self.body["TableName"]
 
         filters = {}
-        scan_filters = self._get_param("ScanFilter", {})
+        scan_filters = self.body.get("ScanFilter", {})
         for attribute_name, scan_filter in scan_filters.items():
             # Keys are attribute names. Values are tuples of (comparison,
             # comparison_value)
@@ -261,11 +258,11 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(result)
 
     def delete_item(self):
-        name = self._get_param("TableName")
-        key = self._get_param("Key")
+        name = self.body["TableName"]
+        key = self.body["Key"]
         hash_key = key["HashKeyElement"]
         range_key = key.get("RangeKeyElement")
-        return_values = self._get_param("ReturnValues", "")
+        return_values = self.body.get("ReturnValues", "")
         item = dynamodb_backend.delete_item(name, hash_key, range_key)
         if item:
             if return_values == "ALL_OLD":
@@ -279,12 +276,12 @@ class DynamoHandler(BaseResponse):
             return self.error(er)
 
     def update_item(self):
-        name = self._get_param("TableName")
-        key = self._get_param("Key")
+        name = self.body["TableName"]
+        key = self.body["Key"]
         hash_key = key["HashKeyElement"]
         range_key = key.get("RangeKeyElement")
-        updates = self._get_param("AttributeUpdates")
-        return_values = self._get_param("ReturnValues", "")  # noqa
+        updates = self.body["AttributeUpdates"]
+        return_values = self.body.get("ReturnValues", "")  # noqa
 
         item = dynamodb_backend.update_item(name, hash_key, range_key, updates)
 
