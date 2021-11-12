@@ -99,17 +99,6 @@ def get_empty_str_error():
 
 
 class DynamoHandler(BaseResponse):
-    def get_endpoint_name(self, headers):
-        """Parses request headers and extracts part od the X-Amz-Target
-        that corresponds to a method of DynamoHandler
-
-        ie: X-Amz-Target: DynamoDB_20111205.ListTables -> ListTables
-        """
-        # Headers are case-insensitive. Probably a better way to do this.
-        match = headers.get("x-amz-target") or headers.get("X-Amz-Target")
-        if match:
-            return match.split(".")[1]
-
     def error(self, type_, message, status=400):
         return (
             status,

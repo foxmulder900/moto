@@ -387,9 +387,7 @@ class BaseResponse(_TemplateEnvironmentMixin, ActionAuthenticatorMixin):
         return action
 
     def call_action(self):
-        action = self._get_action()
         headers = self.response_headers
-        self.data["Action"] = action
 
         try:
             self._authenticate_and_authorize_normal_action()
@@ -397,7 +395,7 @@ class BaseResponse(_TemplateEnvironmentMixin, ActionAuthenticatorMixin):
             response = http_error.description, dict(status=http_error.code)
             return self._send_response(headers, response)
 
-        action = camelcase_to_underscores(action)
+        action = camelcase_to_underscores(self._get_action())
         method_names = method_names_from_class(self.__class__)
         if action in method_names:
             method = getattr(self, action)

@@ -52,6 +52,22 @@ def create_access_key(access_key_id, headers):
         return AssumedRoleAccessKey(access_key_id, headers)
 
 
+def get_endpoint_name_from_data(data):
+    action = data.get("Action")
+    return action[0] if isinstance(action, list) else action
+
+
+def get_endpoint_name_from_headers(headers):
+    """Some AWS services, such as DynamoDB, include the endpoint in the x-amz-target header
+
+    ie: X-Amz-Target: DynamoDB_20111205.ListTables -> ListTables
+    """
+    # Headers are case-insensitive. Probably a better way to do this.
+    match = headers.get("x-amz-target") or headers.get("X-Amz-Target")
+    if match:
+        return match.split(".")[1]
+
+
 class IAMUserAccessKey(object):
     def __init__(self, access_key_id, headers):
         iam_users = iam_backend.list_users("/", None, None)
@@ -179,15 +195,7 @@ class IAMRequestBase(object, metaclass=ABCMeta):
         credential_data = credential_scope.split("/")
         self._region = credential_data[2]
         self._service = credential_data[3]
-        self._action = (
-            self._service
-            + ":"
-            + (
-                self._data["Action"][0]
-                if isinstance(self._data["Action"], list)
-                else self._data["Action"]
-            )
-        )
+        self._action = f"{self._service}:{get_endpoint_name_from_data(data) or get_endpoint_name_from_headers(headers)}"
         try:
             self._access_key = create_access_key(
                 access_key_id=credential_data[0], headers=headers
