@@ -124,7 +124,7 @@ class ActionAuthenticatorMixin(object):
             iam_request = iam_request_cls(
                 method=self.method, path=self.path, data=self.data, headers=self.headers
             )
-            # iam_request.check_signature()
+            iam_request.check_signature()
             iam_request.check_action_permitted()
         else:
             ActionAuthenticatorMixin.request_count += 1

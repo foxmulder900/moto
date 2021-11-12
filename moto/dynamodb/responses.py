@@ -83,7 +83,7 @@ class DynamoHandler(BaseResponse):
         return dynamo_json_dump(table.describe)
 
     def delete_table(self):
-        name = self._get_param("TableName")
+        name = self.body["TableName"]
         table = dynamodb_backend.delete_table(name)
         if table:
             return dynamo_json_dump(table.describe)

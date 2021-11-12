@@ -6,7 +6,6 @@ import itertools
 from functools import wraps
 
 from moto.core.responses import BaseResponse
-from moto.core.utils import camelcase_to_underscores, amz_crc32, amzn_request_id
 from .exceptions import (
     InvalidIndexNameError,
     MockValidationException,
@@ -111,12 +110,12 @@ class DynamoHandler(BaseResponse):
         if match:
             return match.split(".")[1]
 
-    # def error(self, type_, message, status=400):
-    #     return (
-    #         status,
-    #         self.response_headers,
-    #         dynamo_json_dump({"__type": type_, "message": message}),
-    #     )
+    def error(self, type_, message, status=400):
+        return (
+            status,
+            self.response_headers,
+            dynamo_json_dump({"__type": type_, "message": message}),
+        )
 
     @property
     def dynamodb_backend(self):
@@ -125,24 +124,6 @@ class DynamoHandler(BaseResponse):
         :rtype: moto.dynamodb2.models.DynamoDBBackend
         """
         return dynamodb_backends[self.region]
-
-    # @amz_crc32
-    # @amzn_request_id
-    # def call_action(self):
-    #     self.body = json.loads(self.body or "{}")
-    #     endpoint = self.get_endpoint_name(self.headers)
-    #     if endpoint:
-    #         endpoint = camelcase_to_underscores(endpoint)
-    #         response = getattr(self, endpoint)()
-    #         if isinstance(response, str):
-    #             return 200, self.response_headers, response
-    #
-    #         else:
-    #             status_code, new_headers, response_content = response
-    #             self.response_headers.update(new_headers)
-    #             return status_code, self.response_headers, response_content
-    #     else:
-    #         return 404, self.response_headers, ""
 
     def list_tables(self):
         body = self.body
@@ -480,17 +461,12 @@ class DynamoHandler(BaseResponse):
             er = "com.amazon.coral.validate#ValidationException"
             return self.error(er, "Validation Exception")
 
-
-        template = self.response_template(DYNAMODB_GET_ITEM)
-        return template.render(buckets=all_buckets)
-
-        #
-        # if item:
-        #     item_dict = item.describe_attrs(attributes=None)
-        #     return dynamo_json_dump(item_dict)
-        # else:
-        #     # Item not found
-        #     return dynamo_json_dump({})
+        if item:
+            item_dict = item.describe_attrs(attributes=None)
+            return dynamo_json_dump(item_dict)
+        else:
+            # Item not found
+            return dynamo_json_dump({})
 
     def batch_get_item(self):
         table_batches = self._get_param("RequestItems")
