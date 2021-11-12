@@ -204,10 +204,14 @@ class IAMRequestBase(object, metaclass=ABCMeta):
             self._raise_invalid_access_key(e.reason)
 
     def check_signature(self):
+        print(self._headers)
         original_signature = self._get_string_between(
             "Signature=", ",", self._headers["Authorization"]
         )
+        print(original_signature)
         calculated_signature = self._calculate_signature()
+        print(calculated_signature)
+        print("These seem to not match...")
         if original_signature != calculated_signature:
             self._raise_signature_does_not_match()
 
